@@ -1,6 +1,7 @@
 import { WORLD_W, WORLD_H, ISLAND_RECT, GRASS_RECT, state } from './state.js';
 import { RetroAudio } from './audio.js';
 import { openUpgradeMenu, spawnFloatingText } from './ui.js';
+import { destroyActiveTurret } from './combat.js';
 
 export function initWorld(scene) {
     scene.waterTile = scene.add.tileSprite(0, 0, WORLD_W, WORLD_H, 'water_tile').setOrigin(0).setDepth(0);
@@ -9,7 +10,6 @@ export function initWorld(scene) {
     scene.add.tileSprite(ISLAND_RECT.x, ISLAND_RECT.y, ISLAND_RECT.w, ISLAND_RECT.h, 'sand_tile').setOrigin(0).setDepth(2);
     scene.add.tileSprite(GRASS_RECT.x, GRASS_RECT.y, GRASS_RECT.w, GRASS_RECT.h, 'grass_tile').setOrigin(0).setDepth(2);
 
-    // Muro de acantilado alrededor de la isla
     for (let x = ISLAND_RECT.x; x < ISLAND_RECT.x + ISLAND_RECT.w; x += 16) {
         scene.add.image(x + 8, ISLAND_RECT.y + 4, 'cliff_tile').setDepth(3);
         scene.add.image(x + 8, ISLAND_RECT.y + ISLAND_RECT.h - 4, 'cliff_tile').setDepth(3);
@@ -19,7 +19,6 @@ export function initWorld(scene) {
         scene.add.image(ISLAND_RECT.x + ISLAND_RECT.w - 4, y + 8, 'cliff_tile').setDepth(3);
     }
 
-    // Rayos de sol diagonales
     scene.sunRaysGraphics = scene.add.graphics().setDepth(35);
     scene.sunRaysGraphics.fillStyle(0xe8ff78, 0.08);
     [[180, 0, 90], [420, 0, 120], [680, 0, 80]].forEach(([sx, sy, w]) => {
@@ -35,6 +34,7 @@ export function initWorld(scene) {
     scene.tidePoolsGroup = scene.add.group();
     scene.obstaclesGroup = scene.physics.add.staticGroup();
     scene.enemiesGroup = scene.physics.add.group();
+    scene.nutsGroup = scene.physics.add.group();
     scene.roomDecos = scene.add.group();
     scene.butterflies = [];
     scene.sunMotes = [];
@@ -51,9 +51,11 @@ export function buildProceduralRoom(scene) {
     scene.obstaclesGroup.clear(true, true);
     scene.tidePoolsGroup.clear(true, true);
     scene.enemiesGroup.clear(true, true);
+    scene.nutsGroup.clear(true, true);
     scene.playerBulletsGroup.clear(true, true);
     scene.enemyBulletsGroup.clear(true, true);
     scene.roomDecos.clear(true, true);
+    destroyActiveTurret(scene);
 
     scene.butterflies.forEach(b => b.sprite.destroy());
     scene.butterflies = [];
@@ -122,33 +124,106 @@ export function buildProceduralRoom(scene) {
         scene.sunMotes.push({ rect, phase: Math.random() * Math.PI * 2 });
     }
 
+    // A partir del Nivel 3: Tuercas iniciales regadas por la arena
+    if (state.room >= 3) {
+        const initialNuts = 5;
+        for (let i = 0; i < initialNuts; i++) {
+            spawnNutInArena(scene);
+        }
+        state.nutSpawnTimer = 6000; // 1 tuerca nueva cada 6 segundos
+    }
+
     spawnRoomWave(scene);
     spawnFloatingText(scene, scene.player.x, scene.player.y - 22, `ISLA SECTOR ${state.room}`, '#ffe858');
 }
 
+export function spawnNutInArena(scene) {
+    if (scene.nutsGroup.countActive(true) >= 10) return;
+
+    // Priorizar las franjas de arena de la isla o bordes de la pradera
+    let nx, ny;
+    if (Math.random() < 0.65) {
+        // En la arena perimetral
+        const side = Phaser.Math.Between(0, 3);
+        if (side === 0) {
+            nx = Phaser.Math.Between(ISLAND_RECT.x + 24, ISLAND_RECT.x + ISLAND_RECT.w - 24);
+            ny = Phaser.Math.Between(ISLAND_RECT.y + 22, GRASS_RECT.y - 6);
+        } else if (side === 1) {
+            nx = Phaser.Math.Between(ISLAND_RECT.x + 24, ISLAND_RECT.x + ISLAND_RECT.w - 24);
+            ny = Phaser.Math.Between(GRASS_RECT.y + GRASS_RECT.h + 6, ISLAND_RECT.y + ISLAND_RECT.h - 22);
+        } else if (side === 2) {
+            nx = Phaser.Math.Between(ISLAND_RECT.x + 22, GRASS_RECT.x - 6);
+            ny = Phaser.Math.Between(ISLAND_RECT.y + 24, ISLAND_RECT.y + ISLAND_RECT.h - 24);
+        } else {
+            nx = Phaser.Math.Between(GRASS_RECT.x + GRASS_RECT.w + 6, ISLAND_RECT.x + ISLAND_RECT.w - 22);
+            ny = Phaser.Math.Between(ISLAND_RECT.y + 24, ISLAND_RECT.y + ISLAND_RECT.h - 24);
+        }
+    } else {
+        nx = Phaser.Math.Between(ISLAND_RECT.x + 30, ISLAND_RECT.x + ISLAND_RECT.w - 30);
+        ny = Phaser.Math.Between(ISLAND_RECT.y + 30, ISLAND_RECT.y + ISLAND_RECT.h - 30);
+    }
+
+    const nut = scene.nutsGroup.create(nx, ny, 'nut_item').setDepth(6);
+    scene.tweens.add({
+        targets: nut,
+        y: ny - 3,
+        duration: 700,
+        yoyo: true,
+        repeat: -1
+    });
+    spawnParticles(scene, nx, ny, 0xd8f0ff, 4);
+}
+
 function spawnRoomWave(scene) {
-    const budget = 3 + Math.floor(state.room * 1.5);
+    const initialCount = state.room < 3 ? (3 + state.room) : (4 + Math.floor(state.room * 0.8));
+
+    // A partir del Nivel 3 los niveles son más largos: enemigos de refuerzo aparecen conforme derrotas a los actuales
+    if (state.room >= 3) {
+        state.remainingReinforcements = 4 + state.room * 2;
+    } else {
+        state.remainingReinforcements = 0;
+    }
+
     if (state.room % 5 === 0) {
         spawnEnemy(scene, WORLD_W / 2, GRASS_RECT.y + 80, 'golem', false);
     }
-    for (let i = 0; i < budget; i++) {
-        let ex, ey;
-        do {
-            ex = Phaser.Math.Between(GRASS_RECT.x + 30, GRASS_RECT.x + GRASS_RECT.w - 30);
-            ey = Phaser.Math.Between(GRASS_RECT.y + 30, GRASS_RECT.y + GRASS_RECT.h - 110);
-        } while (Phaser.Math.Distance.Between(ex, ey, scene.player.x, scene.player.y) < 145);
 
-        const roll = Math.random();
-        let type = 'crab';
-        if (state.room >= 2 && roll > 0.48) type = 'boar';
-        if (state.room >= 3 && roll > 0.76) type = 'totem';
-
-        const shinyChance = Math.min(0.35, 0.07 + state.room * 0.025);
-        spawnEnemy(scene, ex, ey, type, Math.random() < shinyChance);
+    for (let i = 0; i < initialCount; i++) {
+        spawnRandomEnemyAtSafePos(scene);
     }
 }
 
-function spawnEnemy(scene, x, y, type, isShiny) {
+export function spawnRandomEnemyAtSafePos(scene) {
+    let ex, ey, tries = 0;
+    do {
+        ex = Phaser.Math.Between(GRASS_RECT.x + 28, GRASS_RECT.x + GRASS_RECT.w - 28);
+        ey = Phaser.Math.Between(GRASS_RECT.y + 28, GRASS_RECT.y + GRASS_RECT.h - 90);
+        tries++;
+    } while (Phaser.Math.Distance.Between(ex, ey, scene.player.x, scene.player.y) < 135 && tries < 15);
+
+    const roll = Math.random();
+    let type = 'crab';
+    if (state.room >= 2 && roll > 0.42) type = 'boar';
+    if (state.room >= 3 && roll > 0.66) type = 'totem';
+    // Nuevo Mob pesado (Bruto Tiki) a partir del nivel 3
+    if (state.room >= 3 && roll > 0.80) type = 'brute';
+
+    const shinyChance = Math.min(0.35, 0.06 + state.room * 0.022);
+    spawnEnemy(scene, ex, ey, type, Math.random() < shinyChance);
+}
+
+export function trySpawnReinforcement(scene) {
+    if (state.remainingReinforcements <= 0) return;
+
+    // Mantener un flujo continuo de refuerzos cuando bajan los enemigos activos
+    const maxSimultaneous = 5 + Math.min(4, Math.floor(state.room / 2));
+    while (state.remainingReinforcements > 0 && scene.enemiesGroup.countActive(true) < maxSimultaneous) {
+        state.remainingReinforcements--;
+        spawnRandomEnemyAtSafePos(scene);
+    }
+}
+
+export function spawnEnemy(scene, x, y, type, isShiny) {
     let baseKey = `enemy_${type}`;
     if (isShiny && type !== 'golem') baseKey += '_shiny';
 
@@ -157,31 +232,42 @@ function spawnEnemy(scene, x, y, type, isShiny) {
     enemy.setCollideWorldBounds(true);
     enemy.setBounce(0.6);
     enemy.setDepth(9);
-    enemy.shadow = scene.add.image(x, y + 10, 'shadow').setDepth(8);
+    enemy.shadow = scene.add.image(x, y + 11, 'shadow').setDepth(8);
 
     const scaleMult = 1 + (state.room - 1) * 0.14;
-    const shinyMult = isShiny ? 1.6 : 1;
+    const shinyMult = isShiny ? 1.55 : 1;
 
     enemy.enemyType = type;
     enemy.isShiny = isShiny;
     enemy.stunnedUntil = 0;
-    enemy.actionTimer = Phaser.Math.Between(500, 1300);
+    enemy.actionTimer = Phaser.Math.Between(550, 1300);
     enemy.spiralAngle = 0;
     enemy.charging = false;
+    enemy.windingUp = false;
+    enemy.telegraphCircle = null;
 
     if (type === 'crab') {
         enemy.hp = 45 * scaleMult * shinyMult;
-        enemy.speed = 72 * (isShiny ? 1.25 : 1);
+        enemy.speed = 72 * (isShiny ? 1.2 : 1);
     } else if (type === 'boar') {
         enemy.hp = 65 * scaleMult * shinyMult;
-        enemy.speed = 95 * (isShiny ? 1.25 : 1);
+        enemy.speed = 95 * (isShiny ? 1.2 : 1);
     } else if (type === 'totem') {
         enemy.hp = 80 * scaleMult * shinyMult;
         enemy.speed = 32;
+    } else if (type === 'brute') {
+        // Nuevo Mob grande y pesado: mucha vida, lento, ataque a distancia y golpe cercano demoledor
+        enemy.hp = 175 * scaleMult * shinyMult;
+        enemy.speed = 46 * (isShiny ? 1.15 : 1);
+        enemy.shadow.setScale(1.4);
+        enemy.body.setSize(26, 26).setOffset(4, 6);
     } else if (type === 'golem') {
         enemy.hp = 320 * scaleMult;
         enemy.speed = 48;
     }
+
+    // Efecto de aparición en la arena
+    spawnParticles(scene, x, y, 0x78ff68, 6);
 
     if (isShiny) {
         RetroAudio.play('shiny');

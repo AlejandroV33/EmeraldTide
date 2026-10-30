@@ -1,11 +1,12 @@
 import { WORLD_W, WORLD_H, ISLAND_RECT, WEAPONS, state, getUpgradeLevel } from './state.js';
 import { RetroAudio } from './audio.js';
-import { onRoomCleared, spawnParticles } from './world.js';
+import { onRoomCleared, spawnParticles, trySpawnReinforcement, spawnNutInArena } from './world.js';
 import { spawnFloatingText, triggerGameOver } from './ui.js';
 
 export function initCombat(scene) {
     scene.playerBulletsGroup = scene.physics.add.group();
     scene.enemyBulletsGroup = scene.physics.add.group();
+    scene.activeTurret = null;
 
     scene.playerShadow = scene.add.image(WORLD_W / 2, WORLD_H / 2 + 10, 'shadow').setDepth(9);
     scene.player = scene.physics.add.sprite(WORLD_W / 2, ISLAND_RECT.y + ISLAND_RECT.h - 55, 'player_0').setDepth(10);
@@ -13,9 +14,14 @@ export function initCombat(scene) {
     scene.player.body.setSize(14, 14).setOffset(5, 8);
 
     scene.heldWeapon = scene.add.image(scene.player.x + 8, scene.player.y + 2, 'held_sword').setDepth(11);
-    scene.parryArc = scene.add.image(scene.player.x, scene.player.y, 'parry_arc').setDepth(13).setVisible(false);
 
-    // Teclas de Movimiento (WASD / Flechas), Apuntado (IJKL), Disparo (SPACE) y Parry (SHIFT)
+    // El arco azul del Parry ahora es un Sprite Físico con su propia área de colisión
+    scene.parryArc = scene.physics.add.sprite(scene.player.x, scene.player.y, 'parry_arc')
+        .setDepth(13)
+        .setVisible(false);
+    scene.parryArc.body.setCircle(20, 2, 2);
+    scene.parryArc.body.enable = false;
+
     scene.cursors = scene.input.keyboard.createCursorKeys();
     scene.keys = scene.input.keyboard.addKeys({
         W: Phaser.Input.Keyboard.KeyCodes.W,
@@ -40,7 +46,7 @@ export function initCombat(scene) {
     scene.input.setDefaultCursor('none');
     scene.crosshair = scene.add.image(scene.player.x, scene.player.y - 40, 'crosshair').setDepth(200);
 
-    // Parry con Clic Derecho o con tecla SHIFT
+    // Parry con Clic Derecho o con SHIFT
     scene.input.on('pointerdown', (ptr) => {
         if (ptr.rightButtonDown()) triggerParry(scene);
     });
@@ -55,7 +61,7 @@ export function initCombat(scene) {
         }
     });
 
-    // Colisiones físicas
+    // Colisiones con obstáculos
     scene.physics.add.collider(scene.player, scene.obstaclesGroup);
     scene.physics.add.collider(scene.enemiesGroup, scene.obstaclesGroup);
     scene.physics.add.collider(scene.enemiesGroup, scene.enemiesGroup);
@@ -89,23 +95,29 @@ export function initCombat(scene) {
         bullet.destroy();
     });
 
-    scene.physics.add.overlap(scene.player, scene.enemyBulletsGroup, (plr, bullet) => {
+    // 1. NUEVO PARRY: Rebota SOLO proyectiles cuando tocan el arco azul (parryArc)
+    scene.physics.add.overlap(scene.parryArc, scene.enemyBulletsGroup, (arc, bullet) => {
         if (state.isParrying && bullet.canParry) {
-            executeSuccessfulParry(scene, bullet, null);
-        } else {
-            damagePlayer(scene, 15);
-            bullet.destroy();
+            executeSuccessfulProjectileParry(scene, bullet);
         }
     });
 
+    // 2. Si el proyectil llega a tocar al jugador directamente, el jugador recibe daño
+    scene.physics.add.overlap(scene.player, scene.enemyBulletsGroup, (plr, bullet) => {
+        damagePlayer(scene, 15);
+        bullet.destroy();
+    });
+
+    // 3. Los ataques cuerpo a cuerpo / contacto con enemigos YA NO tienen Parry
     scene.physics.add.overlap(scene.player, scene.enemiesGroup, (plr, enemy) => {
-        if (state.isParrying) {
-            executeSuccessfulParry(scene, null, enemy);
-        } else {
-            damagePlayer(scene, 18);
-            const ang = Phaser.Math.Angle.Between(enemy.x, enemy.y, plr.x, plr.y);
-            plr.setVelocity(Math.cos(ang) * 240, Math.sin(ang) * 240);
-        }
+        damagePlayer(scene, 18);
+        const ang = Phaser.Math.Angle.Between(enemy.x, enemy.y, plr.x, plr.y);
+        plr.setVelocity(Math.cos(ang) * 240, Math.sin(ang) * 240);
+    });
+
+    // 4. Recolección de Tuercas en la arena
+    scene.physics.add.overlap(scene.player, scene.nutsGroup, (plr, nut) => {
+        collectNut(scene, nut);
     });
 }
 
@@ -118,37 +130,49 @@ export function updateCombat(scene, time, delta) {
     updateAimingSystem(scene);
     updatePlayerMovement(scene, time);
 
+    // Control de la ventana activa de la animación azul del Parry
     if (state.isParrying && time > state.parryWindowEnd) {
         state.isParrying = false;
         scene.parryArc.setVisible(false);
+        scene.parryArc.body.enable = false;
     }
     if (state.isParrying) {
+        // Posicionar la animación azul justo delante del jugador en dirección a la mira
+        const arcDist = 20;
         scene.parryArc.setPosition(
-            scene.player.x + Math.cos(state.aimAngle) * 15,
-            scene.player.y + Math.sin(state.aimAngle) * 15
+            scene.player.x + Math.cos(state.aimAngle) * arcDist,
+            scene.player.y + Math.sin(state.aimAngle) * arcDist
         );
         scene.parryArc.setRotation(state.aimAngle);
     }
 
-    // Disparo con Clic Izquierdo O con Barra Espaciadora
+    // Disparo con Clic Izquierdo o Espacio
     if ((scene.pointer.leftButtonDown() || scene.keys.SPACE.isDown) && !state.isParrying) {
         tryShootWeapon(scene, time);
     }
 
     updateEnemiesAI(scene, time, delta);
+    updateTurretSystem(scene, time, delta);
 
-    if (!state.roomCleared && scene.enemiesGroup.countActive(true) === 0) {
+    // Spawneo periódico de tuercas desde el Nivel 3
+    if (state.room >= 3 && !state.roomCleared) {
+        state.nutSpawnTimer -= delta;
+        if (state.nutSpawnTimer <= 0) {
+            state.nutSpawnTimer = 6000; // 1 tuerca nueva cada 6 segundos
+            spawnNutInArena(scene);
+        }
+    }
+
+    // La sala solo termina cuando no quedan enemigos activos NI refuerzos por aparecer
+    if (!state.roomCleared && scene.enemiesGroup.countActive(true) === 0 && state.remainingReinforcements === 0) {
         onRoomCleared(scene);
     }
 }
 
-// Sistema de Apuntado Dual: Mouse + Teclado (I, J, K, L en 8 direcciones)
 function updateAimingSystem(scene) {
     scene.pointer.updateWorldPoint(scene.cameras.main);
 
-    // 1. Comprobar teclas I, J, K, L (incluyendo diagonales al presionar 2 teclas)
-    let ax = 0;
-    let ay = 0;
+    let ax = 0, ay = 0;
     if (scene.keys.J.isDown) ax -= 1;
     if (scene.keys.L.isDown) ax += 1;
     if (scene.keys.I.isDown) ay -= 1;
@@ -158,7 +182,6 @@ function updateAimingSystem(scene) {
         state.aimMode = 'keyboard';
         state.aimAngle = Math.atan2(ay, ax);
     } else {
-        // Si el mouse se mueve, cambiar automáticamente a modo ratón
         const mouseMoved = Math.hypot(scene.pointer.x - state.lastMouseX, scene.pointer.y - state.lastMouseY) > 2;
         if (mouseMoved) {
             state.aimMode = 'mouse';
@@ -176,7 +199,6 @@ function updateAimingSystem(scene) {
         );
         scene.crosshair.setPosition(scene.pointer.worldX, scene.pointer.worldY);
     } else {
-        // En modo teclado (IJKL), colocar la mira a 52px del jugador en la dirección apuntada
         scene.crosshair.setPosition(
             scene.player.x + Math.cos(state.aimAngle) * 52,
             scene.player.y + Math.sin(state.aimAngle) * 52
@@ -269,74 +291,227 @@ function spawnPlayerBullet(scene, x, y, angle, speed, damage, isParried) {
     scene.time.delayedCall(1600, () => { if (b && b.active) b.destroy(); });
 }
 
+// ==========================================
+// PARRY REDISEÑADO: COLISIÓN EN ARCO AZUL
+// ==========================================
 export function triggerParry(scene) {
     if (state.gameOver || state.choosingUpgrade) return;
     const now = scene.time.now;
     if (now < state.parryCooldownEnd) return;
 
     state.isParrying = true;
-    state.parryWindowEnd = now + 260;
-    state.parryCooldownEnd = now + 1150;
+    // Ventana corta pero justa (320 ms) para interceptar proyectiles con el arco azul
+    state.parryWindowEnd = now + 320;
+    state.parryCooldownEnd = now + 980;
 
     RetroAudio.play('parry_swing');
+    scene.parryArc.setPosition(
+        scene.player.x + Math.cos(state.aimAngle) * 20,
+        scene.player.y + Math.sin(state.aimAngle) * 20
+    );
+    scene.parryArc.setRotation(state.aimAngle);
     scene.parryArc.setVisible(true);
-    scene.parryArc.setScale(1.15);
-    scene.tweens.add({ targets: scene.parryArc, scale: 1, duration: 170 });
+    scene.parryArc.body.enable = true;
+    scene.parryArc.setScale(1.2);
+    scene.tweens.add({ targets: scene.parryArc, scale: 1, duration: 200 });
 }
 
-function executeSuccessfulParry(scene, bullet, meleeEnemy) {
+function executeSuccessfulProjectileParry(scene, bullet) {
     const now = scene.time.now;
-    state.parryCooldownEnd = now;
-    state.invulnEnd = now + 380;
+    state.parryCooldownEnd = now; // Reinicia el enfriamiento al instante si rebotas el proyectil
+    state.invulnEnd = now + 260;
 
     if (getUpgradeLevel('tropicalFury') > 0) state.furyEnd = now + 3000;
 
     const tideLv = getUpgradeLevel('tideWave');
     if (tideLv > 0) {
         state.hp = Math.min(state.maxHp, state.hp + 6 * tideLv);
-        createWaterExplosion(scene, scene.player.x, scene.player.y, 75, 28 * tideLv);
+        createWaterExplosion(scene, bullet.x, bullet.y, 75, 28 * tideLv);
     }
 
     RetroAudio.play('parry_hit');
     scene.physics.world.pause();
-    scene.cameras.main.flash(80, 220, 255, 255);
+    scene.cameras.main.flash(75, 200, 255, 255);
     setTimeout(() => {
         if (scene && scene.physics && scene.physics.world) scene.physics.world.resume();
-    }, 75);
+    }, 65);
 
-    scene.cameras.main.shake(120, 0.008);
-    spawnFloatingText(scene, scene.player.x, scene.player.y - 20, '¡PARRY!', '#68ffff');
-    spawnParticles(scene, scene.player.x, scene.player.y, 0x68ffff, 12);
+    scene.cameras.main.shake(110, 0.008);
+    spawnFloatingText(scene, bullet.x, bullet.y - 16, '¡PARRY!', '#68ffff');
+    spawnParticles(scene, bullet.x, bullet.y, 0x68ffff, 12);
 
-    if (bullet) {
-        const total = 1 + getUpgradeLevel('mirror') * 2;
-        for (let i = 0; i < total; i++) {
-            const off = (i - Math.floor(total / 2)) * 0.22;
-            spawnPlayerBullet(scene, scene.player.x, scene.player.y, state.aimAngle + off, 620, 65, true);
-        }
-        bullet.destroy();
+    // Rebota desde la posición del arco azul hacia donde apunta el jugador
+    const total = 1 + getUpgradeLevel('mirror') * 2;
+    for (let i = 0; i < total; i++) {
+        const off = (i - Math.floor(total / 2)) * 0.22;
+        spawnPlayerBullet(scene, bullet.x, bullet.y, state.aimAngle + off, 640, 68, true);
+    }
+    bullet.destroy();
+}
+
+// ==========================================
+// SISTEMA DE TUERCAS Y TORRETA ALIADA
+// ==========================================
+function collectNut(scene, nut) {
+    const nx = nut.x;
+    const ny = nut.y;
+    nut.destroy();
+    RetroAudio.play('powerup');
+    spawnParticles(scene, nx, ny, 0xd8f0ff, 7);
+
+    // Si la torreta ya está activa y estamos cerca de ella, repararla directamente
+    if (scene.activeTurret && Phaser.Math.Distance.Between(scene.player.x, scene.player.y, scene.activeTurret.x, scene.activeTurret.y) < 55) {
+        repairActiveTurret(scene, 1);
+        return;
     }
 
-    if (meleeEnemy) {
-        meleeEnemy.stunnedUntil = now + 2000;
-        meleeEnemy.charging = false;
-        const knock = Phaser.Math.Angle.Between(scene.player.x, scene.player.y, meleeEnemy.x, meleeEnemy.y);
-        meleeEnemy.setVelocity(Math.cos(knock) * 340, Math.sin(knock) * 340);
-        damageEnemy(scene, meleeEnemy, 45, true);
-        createWaterExplosion(scene, meleeEnemy.x, meleeEnemy.y, 65, 30);
+    state.nuts++;
+
+    // Si aún no hay torreta y llegamos a 5 tuercas, se construye automáticamente
+    if (!scene.activeTurret && state.nuts >= 5) {
+        state.nuts -= 5;
+        deployHelperTurret(scene, scene.player.x, scene.player.y);
+    } else {
+        spawnFloatingText(scene, nx, ny - 12, `+1 Tuerca (${state.nuts}/5)`, '#d8f0ff');
     }
 }
 
+function deployHelperTurret(scene, x, y) {
+    RetroAudio.play('shiny');
+    spawnParticles(scene, x, y, 0x68ffff, 14);
+    spawnFloatingText(scene, x, y - 24, '¡TORRETA DESPLEGADA!', '#68ffff');
+
+    const range = 145; // Rango moderado de disparo
+    const rangeCircle = scene.add.circle(x, y, range, 0x58e8ff, 0.07)
+        .setStrokeStyle(1, 0x58e8ff, 0.35)
+        .setDepth(4);
+    const base = scene.add.image(x, y, 'turret_base').setDepth(8);
+    const gun = scene.add.image(x, y, 'turret_gun').setDepth(9);
+    const hpBg = scene.add.rectangle(x, y - 18, 26, 4, 0x141013).setDepth(15);
+    const hpFill = scene.add.rectangle(x - 12, y - 18, 24, 2, 0x58ff78).setOrigin(0, 0.5).setDepth(16);
+
+    scene.activeTurret = {
+        x,
+        y,
+        hp: 100,
+        maxHp: 100,
+        range,
+        fireTimer: 0,
+        rangeCircle,
+        base,
+        gun,
+        hpBg,
+        hpFill
+    };
+}
+
+function repairActiveTurret(scene, nutsUsed) {
+    const t = scene.activeTurret;
+    if (!t) return;
+    t.hp = Math.min(t.maxHp, t.hp + nutsUsed * 28);
+    RetroAudio.play('powerup');
+    spawnParticles(scene, t.x, t.y, 0x78ff68, 10);
+    spawnFloatingText(scene, t.x, t.y - 24, `¡TORRETA +${nutsUsed * 28}% VIDA!`, '#78ff68');
+}
+
+function updateTurretSystem(scene, time, delta) {
+    const t = scene.activeTurret;
+    if (!t) {
+        // Si no hay torreta pero ya teníamos 5 tuercas guardadas, desplegarla
+        if (state.nuts >= 5) {
+            state.nuts -= 5;
+            deployHelperTurret(scene, scene.player.x, scene.player.y);
+        }
+        return;
+    }
+
+    // 1. Si el jugador trae tuercas en el inventario y se acerca a la torreta herida, la repara automáticamente
+    if (state.nuts > 0 && t.hp < t.maxHp - 5) {
+        const distToPlayer = Phaser.Math.Distance.Between(scene.player.x, scene.player.y, t.x, t.y);
+        if (distToPlayer < 38) {
+            const needed = Math.min(state.nuts, Math.ceil((t.maxHp - t.hp) / 28));
+            if (needed > 0) {
+                state.nuts -= needed;
+                repairActiveTurret(scene, needed);
+            }
+        }
+    }
+
+    // 2. Desgaste natural de la vida de la torreta con el tiempo (6.2 de vida por segundo)
+    if (!state.roomCleared) {
+        t.hp -= 6.2 * (delta * 0.001);
+    }
+    const ratio = Math.max(0, t.hp / t.maxHp);
+    t.hpFill.width = Math.floor(24 * ratio);
+    t.hpFill.fillColor = ratio > 0.4 ? 0x58ff78 : 0xff6848;
+
+    if (t.hp <= 0) {
+        spawnParticles(scene, t.x, t.y, 0xff6848, 12);
+        spawnFloatingText(scene, t.x, t.y - 18, 'TORRETA DESGASTADA', '#ff7878');
+        destroyActiveTurret(scene);
+        return;
+    }
+
+    // 3. Buscar al enemigo más cercano dentro de su rango moderado (145px) y disparar automático
+    t.fireTimer -= delta;
+    let closestEnemy = null;
+    let minDist = t.range;
+
+    scene.enemiesGroup.getChildren().forEach((en) => {
+        if (!en.active) return;
+        const d = Phaser.Math.Distance.Between(t.x, t.y, en.x, en.y);
+        if (d <= minDist) {
+            minDist = d;
+            closestEnemy = en;
+        }
+    });
+
+    if (closestEnemy) {
+        const ang = Phaser.Math.Angle.Between(t.x, t.y, closestEnemy.x, closestEnemy.y);
+        t.gun.setRotation(ang);
+
+        if (t.fireTimer <= 0) {
+            t.fireTimer = 420;
+            RetroAudio.play('shoot');
+            const b = scene.playerBulletsGroup.create(
+                t.x + Math.cos(ang) * 12,
+                t.y + Math.sin(ang) * 12,
+                'bullet_player'
+            );
+            b.setDepth(12);
+            b.damage = 18;
+            b.isParriedBullet = false;
+            b.bouncesLeft = 0;
+            b.setTint(0x68ffff);
+            b.setVelocity(Math.cos(ang) * 460, Math.sin(ang) * 460);
+            scene.time.delayedCall(900, () => { if (b && b.active) b.destroy(); });
+        }
+    }
+}
+
+export function destroyActiveTurret(scene) {
+    if (!scene.activeTurret) return;
+    scene.activeTurret.rangeCircle.destroy();
+    scene.activeTurret.base.destroy();
+    scene.activeTurret.gun.destroy();
+    scene.activeTurret.hpBg.destroy();
+    scene.activeTurret.hpFill.destroy();
+    scene.activeTurret = null;
+}
+
+// ==========================================
+// IA DE ENEMIGOS (INCLUYE NUEVO BRUTO TIKI)
+// ==========================================
 function updateEnemiesAI(scene, time, delta) {
     scene.enemiesGroup.getChildren().forEach((enemy) => {
         if (!enemy.active) return;
-        enemy.shadow.setPosition(enemy.x, enemy.y + 10);
+        enemy.shadow.setPosition(enemy.x, enemy.y + (enemy.enemyType === 'brute' ? 14 : 10));
         enemy.setTexture(`${enemy.baseKey}_${state.animFrame}`);
 
         if (time < enemy.stunnedUntil) {
             enemy.setTint(0x68ffff);
             return;
-        } else if (!enemy.charging) {
+        } else if (!enemy.charging && !enemy.windingUp) {
             enemy.clearTint();
         }
 
@@ -344,6 +519,7 @@ function updateEnemiesAI(scene, time, delta) {
         const angleToPlayer = Phaser.Math.Angle.Between(enemy.x, enemy.y, scene.player.x, scene.player.y);
         enemy.actionTimer -= delta;
 
+        // 1. Cangrejo
         if (enemy.enemyType === 'crab') {
             const strafe = angleToPlayer + Math.sin(time * 0.003) * 1.1;
             enemy.setVelocity(Math.cos(strafe) * enemy.speed, Math.sin(strafe) * enemy.speed);
@@ -355,7 +531,9 @@ function updateEnemiesAI(scene, time, delta) {
                     spawnEnemyBullet(scene, enemy.x, enemy.y, angleToPlayer - 0.25, 185, true);
                 }
             }
-        } else if (enemy.enemyType === 'boar') {
+        }
+        // 2. Jabalí
+        else if (enemy.enemyType === 'boar') {
             if (!enemy.charging) {
                 enemy.setVelocity(Math.cos(angleToPlayer) * enemy.speed, Math.sin(angleToPlayer) * enemy.speed);
                 if (dist < 175 && enemy.actionTimer <= 0) {
@@ -372,7 +550,9 @@ function updateEnemiesAI(scene, time, delta) {
                     });
                 }
             }
-        } else if (enemy.enemyType === 'totem') {
+        }
+        // 3. Tótem
+        else if (enemy.enemyType === 'totem') {
             enemy.setVelocity(Math.cos(angleToPlayer) * enemy.speed, Math.sin(angleToPlayer) * enemy.speed);
             if (enemy.actionTimer <= 0) {
                 enemy.actionTimer = enemy.isShiny ? 950 : 1350;
@@ -383,7 +563,64 @@ function updateEnemiesAI(scene, time, delta) {
                     spawnEnemyBullet(scene, enemy.x, enemy.y, ang, 155, i % 2 === 0);
                 }
             }
-        } else if (enemy.enemyType === 'golem') {
+        }
+        // 4. NUEVO MOB (NIVEL 3+): BRUTO / COLOSO TIKI (Ataque a distancia + Golpe cercano lento de alto daño)
+        else if (enemy.enemyType === 'brute') {
+            if (enemy.windingUp) {
+                enemy.setVelocity(0, 0);
+                return;
+            }
+
+            enemy.setVelocity(Math.cos(angleToPlayer) * enemy.speed, Math.sin(angleToPlayer) * enemy.speed);
+
+            // Si el jugador está cerca (<= 75px), prepara su Golpe Sísmico pesado con 650ms de aviso
+            if (dist <= 75 && enemy.actionTimer <= 400) {
+                enemy.windingUp = true;
+                enemy.actionTimer = 2100;
+                enemy.setVelocity(0, 0);
+                enemy.setTint(0xff6830);
+
+                const slamRadius = 64;
+                const telegraph = scene.add.circle(enemy.x, enemy.y, 12, 0xff3838, 0.28)
+                    .setStrokeStyle(2, 0xff3838, 0.9)
+                    .setDepth(5);
+                enemy.telegraphCircle = telegraph;
+
+                // Crece hasta el radio de impacto en 650ms dando tiempo justo para salir
+                scene.tweens.add({
+                    targets: telegraph,
+                    radius: slamRadius,
+                    duration: 650,
+                    onComplete: () => {
+                        if (telegraph) telegraph.destroy();
+                        if (!enemy.active) return;
+
+                        enemy.windingUp = false;
+                        enemy.clearTint();
+                        RetroAudio.play('hit');
+                        scene.cameras.main.shake(170, 0.014);
+                        spawnParticles(scene, enemy.x, enemy.y, 0xff8848, 16);
+
+                        // Verificar si el jugador no logró salir del radio de golpe
+                        const dNow = Phaser.Math.Distance.Between(enemy.x, enemy.y, scene.player.x, scene.player.y);
+                        if (dNow <= slamRadius) {
+                            damagePlayer(scene, 38); // Mucho daño cuerpo a cuerpo
+                            const push = Phaser.Math.Angle.Between(enemy.x, enemy.y, scene.player.x, scene.player.y);
+                            scene.player.setVelocity(Math.cos(push) * 320, Math.sin(push) * 320);
+                        }
+                    }
+                });
+            }
+            // Si el jugador está a distancia (> 75px), lanza un abanico pesado de proyectiles
+            else if (dist > 75 && enemy.actionTimer <= 0) {
+                enemy.actionTimer = enemy.isShiny ? 1400 : 1850;
+                for (let i = -1; i <= 1; i++) {
+                    spawnEnemyBullet(scene, enemy.x, enemy.y, angleToPlayer + i * 0.28, 175, i !== 0);
+                }
+            }
+        }
+        // 5. Gólem (Mini-Jefe)
+        else if (enemy.enemyType === 'golem') {
             enemy.setVelocity(Math.cos(angleToPlayer) * enemy.speed, Math.sin(angleToPlayer) * enemy.speed);
             if (enemy.actionTimer <= 0) {
                 enemy.actionTimer = 1450;
@@ -413,10 +650,14 @@ export function damageEnemy(scene, enemy, amount, isCritical) {
     spawnParticles(scene, enemy.x, enemy.y, isCritical ? 0x68ffff : 0xffe858, isCritical ? 8 : 4);
 
     if (enemy.hp <= 0) {
-        state.score += enemy.isShiny ? 250 : 100;
+        state.score += enemy.isShiny ? 250 : (enemy.enemyType === 'brute' ? 180 : 100);
         spawnParticles(scene, enemy.x, enemy.y, 0xff5858, 12);
+        if (enemy.telegraphCircle) enemy.telegraphCircle.destroy();
         if (enemy.shadow) enemy.shadow.destroy();
         enemy.destroy();
+
+        // Al derrotar un enemigo en Nivel 3+, hacer aparecer refuerzos de la reserva
+        trySpawnReinforcement(scene);
     }
 }
 

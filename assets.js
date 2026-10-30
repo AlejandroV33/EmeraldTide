@@ -57,7 +57,7 @@ export function generateDetailedPixelArt(scene) {
         px(ctx, 0, 0, 16, 2, '#68c838');
     });
 
-    // 2. Naturaleza: Flores, Arbustos, Estanques, Árboles y Rocas
+    // 2. Naturaleza
     const makeFlower = (key, petalCol, centerCol) => {
         makeTex(scene, key, 12, 12, (ctx) => {
             px(ctx, 3, 5, 6, 5, '#287018');
@@ -125,7 +125,7 @@ export function generateDetailedPixelArt(scene) {
         px(ctx, 20, 12, 5, 5, '#ff5898');
     });
 
-    // 3. Jugador y Arma en Mano
+    // 3. Jugador y Arma
     const drawPlayerFrame = (ctx, stepOffset) => {
         const yOff = stepOffset === 1 ? -1 : 0;
         px(ctx, 5, 2 + yOff, 14, 19, OUT);
@@ -158,7 +158,7 @@ export function generateDetailedPixelArt(scene) {
         px(ctx, 8, 3, 7, 2, '#ffffff');
     });
 
-    // 4. Enemigos (Cangrejo, Jabalí, Tótem, Gólem)
+    // 4. Enemigos Clásicos
     const drawCrab = (ctx, bodyCol, hiCol, frame) => {
         const legOff = frame === 1 ? 1 : 0;
         px(ctx, 3, 5, 18, 13, OUT);
@@ -210,6 +210,36 @@ export function generateDetailedPixelArt(scene) {
     makeTex(scene, 'enemy_totem_shiny_0', 24, 28, (ctx) => drawTotem(ctx, '#d8a830', '#58f8ff', 0));
     makeTex(scene, 'enemy_totem_shiny_1', 24, 28, (ctx) => drawTotem(ctx, '#d8a830', '#58f8ff', 1));
 
+    // NUEVO MOB PESADO (NIVEL 3+): BRUTO / COLOSO TIKI (34x34)
+    const drawBrute = (ctx, armorCol, glowCol, frame) => {
+        const yOff = frame === 1 ? -1 : 0;
+        // Torso macizo y hombreras gigantes
+        px(ctx, 3, 3 + yOff, 28, 27, OUT);
+        px(ctx, 1, 7 + yOff, 32, 18, OUT);
+        px(ctx, 5, 5 + yOff, 24, 23, armorCol);
+        // Mazos/Puños de roca volcánica a los lados
+        px(ctx, 2, 9 + yOff, 6, 14, '#382828');
+        px(ctx, 26, 9 + yOff, 6, 14, '#382828');
+        px(ctx, 3, 10 + yOff, 4, 6, glowCol);
+        px(ctx, 27, 10 + yOff, 4, 6, glowCol);
+        // Máscara de guerra blindada
+        px(ctx, 8, 6 + yOff, 18, 16, OUT);
+        px(ctx, 9, 7 + yOff, 16, 14, '#a85828');
+        // Cuernos superiores
+        px(ctx, 6, 2 + yOff, 5, 5, '#ffe068');
+        px(ctx, 23, 2 + yOff, 5, 5, '#ffe068');
+        // Ojos encendidos y fauces
+        px(ctx, 11, 10 + yOff, 4, 3, glowCol);
+        px(ctx, 19, 10 + yOff, 4, 3, glowCol);
+        px(ctx, 12, 16 + yOff, 10, 4, OUT);
+        px(ctx, 13, 17 + yOff, 2, 2, '#ffffff');
+        px(ctx, 19, 17 + yOff, 2, 2, '#ffffff');
+    };
+    makeTex(scene, 'enemy_brute_0', 34, 34, (ctx) => drawBrute(ctx, '#583828', '#ff6830', 0));
+    makeTex(scene, 'enemy_brute_1', 34, 34, (ctx) => drawBrute(ctx, '#583828', '#ff6830', 1));
+    makeTex(scene, 'enemy_brute_shiny_0', 34, 34, (ctx) => drawBrute(ctx, '#285868', '#58ffff', 0));
+    makeTex(scene, 'enemy_brute_shiny_1', 34, 34, (ctx) => drawBrute(ctx, '#285868', '#58ffff', 1));
+
     makeTex(scene, 'enemy_golem_0', 40, 40, (ctx) => {
         px(ctx, 5, 3, 30, 34, OUT);
         px(ctx, 1, 7, 38, 18, OUT);
@@ -229,7 +259,35 @@ export function generateDetailedPixelArt(scene) {
         px(ctx, 15, 19, 10, 8, '#ffffff');
     });
 
-    // 5. Santuario Tiki, Mariposas y Proyectiles
+    // 5. NUEVO: TUERCA EN LA ARENA Y TORRETA ALIADA
+    makeTex(scene, 'nut_item', 14, 14, (ctx) => {
+        px(ctx, 3, 1, 8, 12, OUT);
+        px(ctx, 1, 3, 12, 8, OUT);
+        px(ctx, 4, 2, 6, 10, '#98b0c8');
+        px(ctx, 2, 4, 10, 6, '#98b0c8');
+        px(ctx, 4, 3, 6, 3, '#d8f0ff'); // Brillo metálico
+        px(ctx, 5, 5, 4, 4, OUT);       // Hueco central hexagonal
+    });
+
+    makeTex(scene, 'turret_base', 26, 26, (ctx) => {
+        // Patas metálicas de soporte
+        px(ctx, 2, 2, 22, 22, OUT);
+        px(ctx, 4, 4, 18, 18, '#506878');
+        px(ctx, 6, 6, 14, 14, '#88a8c0');
+        px(ctx, 9, 9, 8, 8, '#ffe048');
+    });
+
+    makeTex(scene, 'turret_gun', 28, 16, (ctx) => {
+        // Cabezal y doble cañón automático
+        px(ctx, 2, 2, 16, 12, OUT);
+        px(ctx, 16, 4, 11, 8, OUT);
+        px(ctx, 4, 4, 12, 8, '#2898d8');
+        px(ctx, 6, 5, 8, 4, '#68e8ff');
+        px(ctx, 17, 5, 9, 2, '#d8f0ff');
+        px(ctx, 17, 9, 9, 2, '#d8f0ff');
+    });
+
+    // 6. Santuario Tiki, Mariposas y Proyectiles
     makeTex(scene, 'tiki_altar', 44, 46, (ctx) => {
         px(ctx, 4, 38, 36, 6, 'rgba(0,0,0,0.35)');
         px(ctx, 6, 18, 32, 24, OUT);
@@ -281,20 +339,26 @@ export function generateDetailedPixelArt(scene) {
         px(ctx, 3, 3, 6, 6, '#b838ff');
     });
 
-    makeTex(scene, 'parry_arc', 40, 40, (ctx) => {
+    // Animación azul del Parry (más visible para el rebote por contacto directo)
+    makeTex(scene, 'parry_arc', 44, 44, (ctx) => {
         ctx.strokeStyle = OUT;
-        ctx.lineWidth = 7;
+        ctx.lineWidth = 8;
         ctx.beginPath();
-        ctx.arc(20, 20, 15, -Math.PI * 0.45, Math.PI * 0.45);
+        ctx.arc(22, 22, 16, -Math.PI * 0.48, Math.PI * 0.48);
         ctx.stroke();
-        ctx.strokeStyle = '#58ffff';
-        ctx.lineWidth = 4;
+        ctx.strokeStyle = '#28b8ff';
+        ctx.lineWidth = 5;
         ctx.beginPath();
-        ctx.arc(20, 20, 15, -Math.PI * 0.42, Math.PI * 0.42);
+        ctx.arc(22, 22, 16, -Math.PI * 0.45, Math.PI * 0.45);
+        ctx.stroke();
+        ctx.strokeStyle = '#c8ffff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(22, 22, 16, -Math.PI * 0.38, Math.PI * 0.38);
         ctx.stroke();
     });
 
-    // 6. HUD Corazones, Ranuras Octogonales e Iconos de Armas
+    // 7. HUD e Iconos de Mejoras
     const drawHeart = (ctx, fillCol, hiCol) => {
         px(ctx, 1, 1, 4, 2, OUT);
         px(ctx, 6, 1, 4, 2, OUT);
@@ -344,8 +408,6 @@ export function generateDetailedPixelArt(scene) {
         px(ctx, 7, 2, 3, 3, '#ffe048');
     });
 
-    // 7. ICONOS EXCLUSIVOS DE LAS 6 MEJORAS (16x16 Pixel Art)
-    // Espejo Prisma (Cian/Cristal)
     makeTex(scene, 'icon_upg_mirror', 16, 16, (ctx) => {
         px(ctx, 3, 1, 10, 14, OUT);
         px(ctx, 2, 3, 12, 10, OUT);
@@ -357,7 +419,6 @@ export function generateDetailedPixelArt(scene) {
         px(ctx, 12, 10, 3, 2, '#ff68b8');
     });
 
-    // Onda de Marea (Ola turquesa + espuma)
     makeTex(scene, 'icon_upg_tideWave', 16, 16, (ctx) => {
         px(ctx, 1, 4, 14, 10, OUT);
         px(ctx, 2, 8, 12, 5, '#1868d8');
@@ -366,7 +427,6 @@ export function generateDetailedPixelArt(scene) {
         px(ctx, 10, 5, 3, 2, '#ffffff');
     });
 
-    // Botas Aladas (Bota dorada con ala blanca)
     makeTex(scene, 'icon_upg_lightFeet', 16, 16, (ctx) => {
         px(ctx, 3, 3, 10, 11, OUT);
         px(ctx, 4, 4, 5, 8, '#e89028');
@@ -375,7 +435,6 @@ export function generateDetailedPixelArt(scene) {
         px(ctx, 10, 2, 4, 3, '#a8f8ff');
     });
 
-    // Furia Tropical (Rayo de fuego amarillo/naranja)
     makeTex(scene, 'icon_upg_tropicalFury', 16, 16, (ctx) => {
         px(ctx, 4, 1, 9, 14, OUT);
         px(ctx, 7, 2, 5, 5, '#ff5828');
@@ -384,7 +443,6 @@ export function generateDetailedPixelArt(scene) {
         px(ctx, 7, 7, 3, 3, '#ffffff');
     });
 
-    // Eco Rebote (Esfera esmeralda rebotando)
     makeTex(scene, 'icon_upg_bounce', 16, 16, (ctx) => {
         px(ctx, 1, 2, 3, 12, '#a8b8c8');
         px(ctx, 4, 7, 4, 3, '#58ff78');
@@ -393,7 +451,6 @@ export function generateDetailedPixelArt(scene) {
         px(ctx, 10, 10, 3, 3, '#a8ff68');
     });
 
-    // Coral Afilado (Daga de coral carmesí)
     makeTex(scene, 'icon_upg_damageUp', 16, 16, (ctx) => {
         px(ctx, 2, 2, 12, 12, OUT);
         px(ctx, 9, 2, 5, 5, '#ff2868');

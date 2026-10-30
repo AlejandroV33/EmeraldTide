@@ -7,7 +7,7 @@ export let ui = {};
 export function createHudUI(scene) {
     ui = {};
 
-    // 1. Arriba-Izquierda: Corazones y Barra de Parry
+    // 1. Arriba-Izquierda: Corazones, Barra de Parry, Contador de Isla y Tuercas
     ui.hearts = [];
     for (let i = 0; i < 6; i++) {
         const h = scene.add.image(VIEW_LEFT + 12 + i * 13, VIEW_TOP + 12, 'heart_full')
@@ -29,7 +29,19 @@ export function createHudUI(scene) {
         strokeThickness: 3
     }).setScrollFactor(0).setDepth(101);
 
-    // 2. Arriba-Derecha: 3 Ranuras Octogonales para las MEJORAS EQUIPADAS (Máx 3)
+    // Nuevo indicador de Tuercas y Torreta (aparece desde el Nivel 3)
+    ui.nutIcon = scene.add.image(VIEW_LEFT + 12, VIEW_TOP + 50, 'nut_item')
+        .setScrollFactor(0).setDepth(101);
+    ui.nutLabel = scene.add.text(VIEW_LEFT + 22, VIEW_TOP + 45, '', {
+        fontFamily: 'Courier New',
+        fontSize: '9px',
+        fontStyle: 'bold',
+        color: '#d8f0ff',
+        stroke: '#141013',
+        strokeThickness: 3
+    }).setScrollFactor(0).setDepth(101);
+
+    // 2. Arriba-Derecha: 3 Ranuras Octogonales para las MEJORAS EQUIPADAS
     ui.upgradeSlots = [];
     for (let i = 0; i < 3; i++) {
         const sx = VIEW_LEFT + VIEW_W - 82 + i * 31;
@@ -49,7 +61,6 @@ export function createHudUI(scene) {
         ui.upgradeSlots.push({ frame, icon, badge });
     }
 
-    // Indicador compacto del arma activa debajo de las 3 ranuras de mejora
     ui.weaponLabel = scene.add.text(VIEW_LEFT + VIEW_W - 6, VIEW_TOP + 37, '', {
         fontFamily: 'Courier New',
         fontSize: '8px',
@@ -59,7 +70,7 @@ export function createHudUI(scene) {
         strokeThickness: 3
     }).setOrigin(1, 0).setScrollFactor(0).setDepth(101);
 
-    // 3. Guía inferior con controles de Mouse + Teclado (IJKL / Espacio / Shift)
+    // 3. Guía inferior
     ui.helpText = scene.add.text(
         VIEW_LEFT + VIEW_W / 2,
         VIEW_TOP + VIEW_H - 7,
@@ -74,10 +85,8 @@ export function createHudUI(scene) {
         }
     ).setOrigin(0.5).setScrollFactor(0).setDepth(101);
 
-    // 4. Interfaz Gráfica de Tarjetas para elegir o reemplazar Mejoras
     buildUpgradeCardsModal(scene);
 
-    // 5. Ventana de Game Over
     ui.gameOverBox = scene.add.rectangle(400, 300, 290, 130, 0x141c18, 0.96)
         .setScrollFactor(0).setDepth(160).setStrokeStyle(3, 0xff5858).setVisible(false);
     ui.gameOverText = scene.add.text(400, 300, '', {
@@ -94,7 +103,6 @@ export function createHudUI(scene) {
 function buildUpgradeCardsModal(scene) {
     ui.modalGroup = scene.add.container(0, 0).setScrollFactor(0).setDepth(150).setVisible(false);
 
-    // Fondo oscurecido y cabecera
     const dimBg = scene.add.rectangle(400, 300, 382, 225, 0x0e1814, 0.95)
         .setStrokeStyle(2, 0xffe048);
     ui.modalHeader = scene.add.text(400, 202, 'SANTUARIO TIKI: ELIGE UNA BENDICIÓN', {
@@ -117,7 +125,6 @@ function buildUpgradeCardsModal(scene) {
 
     ui.modalGroup.add([dimBg, ui.modalHeader, ui.modalSubHeader]);
 
-    // 3 Tarjetas gráficas con icono, título, etiqueta de nivel y descripción
     ui.cards = [];
     for (let i = 0; i < 3; i++) {
         const cx = 282 + i * 118;
@@ -173,19 +180,16 @@ function buildUpgradeCardsModal(scene) {
 }
 
 export function updateHudUI(scene, time) {
-    // 1. Corazones de vida
     const activeHearts = Math.ceil((state.hp / state.maxHp) * 6);
     for (let i = 0; i < 6; i++) {
         ui.hearts[i].setTexture(i < activeHearts ? 'heart_full' : 'heart_empty');
     }
 
-    // 2. Barra de enfriamiento del Parry
     const cdRemaining = Math.max(0, state.parryCooldownEnd - time);
-    const ratio = 1 - Math.min(1, cdRemaining / 1150);
+    const ratio = 1 - Math.min(1, cdRemaining / 980);
     ui.barFill.width = Math.floor(74 * ratio);
     ui.barFill.fillColor = ratio >= 1 ? 0x58d838 : 0x48b8ff;
 
-    // 3. Actualizar las 3 ranuras de MEJORAS arriba a la derecha
     for (let i = 0; i < 3; i++) {
         const upg = state.equippedUpgrades[i];
         const slot = ui.upgradeSlots[i];
@@ -200,9 +204,25 @@ export function updateHudUI(scene, time) {
         }
     }
 
+    const totalLeft = scene.enemiesGroup.countActive(true) + state.remainingReinforcements;
+    ui.roomLabel.setText(`ISLA ${state.room} | ENEMIGOS:${totalLeft} | PTS:${state.score}`);
+
+    // Mostrar estado de Tuercas y Torreta
+    if (state.room >= 3 || state.nuts > 0 || scene.activeTurret) {
+        ui.nutIcon.setVisible(true);
+        if (scene.activeTurret) {
+            const pct = Math.ceil(scene.activeTurret.hp);
+            ui.nutLabel.setText(`TORRETA:${pct}% | TUERCAS:${state.nuts} (Acércate p/reparar)`);
+        } else {
+            ui.nutLabel.setText(`TUERCAS: ${state.nuts}/5 (Junta 5 para armar Torreta)`);
+        }
+    } else {
+        ui.nutIcon.setVisible(false);
+        ui.nutLabel.setText('');
+    }
+
     const weapon = WEAPONS[state.weaponIndex];
     ui.weaponLabel.setText(`[Q] ${weapon.name}`);
-    ui.roomLabel.setText(`ISLA ${state.room} | PTS ${state.score}`);
 }
 
 export function openUpgradeMenu(scene) {
@@ -269,7 +289,6 @@ function renderReplaceStepCards(scene) {
 }
 
 export function handleUpgradeKeyboardInput(scene) {
-    // Permitir volver atrás con ESC si está en el paso de reemplazo
     if (state.upgradeStep === 'replace' && Phaser.Input.Keyboard.JustDown(scene.keys.ESC)) {
         state.upgradeStep = 'pick';
         state.pendingUpgrade = null;
@@ -288,7 +307,6 @@ export function handleUpgradeKeyboardInput(scene) {
     if (state.upgradeStep === 'pick') {
         const picked = scene.currentChoices[idx];
 
-        // 1. ¿Ya tiene equipada esta mejora? Subirla de nivel
         const existingSlot = state.equippedUpgrades.findIndex(u => u && u.key === picked.key);
         if (existingSlot !== -1) {
             state.equippedUpgrades[existingSlot].level++;
@@ -296,7 +314,6 @@ export function handleUpgradeKeyboardInput(scene) {
             return;
         }
 
-        // 2. ¿Hay alguna ranura libre de las 3? Agregarla directamente
         const emptySlot = state.equippedUpgrades.findIndex(u => u === null);
         if (emptySlot !== -1) {
             state.equippedUpgrades[emptySlot] = { ...picked, level: 1 };
@@ -304,14 +321,12 @@ export function handleUpgradeKeyboardInput(scene) {
             return;
         }
 
-        // 3. Las 3 ranuras están llenas: pasar a la pantalla de reemplazo
         state.upgradeStep = 'replace';
         state.pendingUpgrade = picked;
         RetroAudio.play('parry_swing');
         renderReplaceStepCards(scene);
 
     } else if (state.upgradeStep === 'replace') {
-        // Reemplazar la mejora de la ranura elegida (0, 1 o 2) por la nueva
         const oldTitle = state.equippedUpgrades[idx].title;
         state.equippedUpgrades[idx] = { ...state.pendingUpgrade, level: 1 };
         finalizeUpgradeSelection(scene, `${oldTitle} ➔ ${state.pendingUpgrade.title}`);

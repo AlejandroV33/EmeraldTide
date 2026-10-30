@@ -91,7 +91,7 @@ export function resetGameState() {
         score: 0,
         weaponIndex: 0,
         lastFired: 0,
-        aimMode: 'mouse', // 'mouse' o 'keyboard' (I, J, K, L)
+        aimMode: 'mouse',
         aimAngle: 0,
         lastMouseX: 0,
         lastMouseY: 0,
@@ -103,19 +103,21 @@ export function resetGameState() {
         footstepTimer: 0,
         animTimer: 0,
         animFrame: 0,
+        // Nuevas propiedades de oleadas largas, tuercas y torreta (Nivel 3+)
+        remainingReinforcements: 0,
+        nuts: 0,
+        nutSpawnTimer: 0,
         roomCleared: false,
         upgradeChosen: false,
         choosingUpgrade: false,
-        upgradeStep: 'pick', // 'pick' o 'replace'
+        upgradeStep: 'pick',
         pendingUpgrade: null,
         transitioning: false,
         gameOver: false,
-        // Máximo 3 mejoras activas: cada ranura guarda { key, title, desc, icon, level } o null
         equippedUpgrades: [null, null, null]
     };
 }
 
-// Devuelve el nivel actual de una mejora si está equipada en una de las 3 ranuras
 export function getUpgradeLevel(key) {
     const found = state.equippedUpgrades.find(u => u && u.key === key);
     return found ? found.level : 0;
